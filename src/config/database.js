@@ -15,7 +15,10 @@ const connectDB = async () => {
   try {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
-    await sequelize.sync({ alter: true });
+
+    // Use 'force: false' to avoid dropping tables
+    // Use 'alter: false' to avoid altering existing tables (prevents FK constraint errors)
+    await sequelize.sync({ force: false, alter: false });
     console.log('Database synchronized.');
   } catch (error) {
     console.error('Unable to connect to the database:', error);
