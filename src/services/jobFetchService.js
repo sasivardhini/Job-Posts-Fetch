@@ -5,11 +5,12 @@ const { Job } = require('../models');
 class JobFetchService {
   constructor() {
     this.sources = {
-      linkedin: this.fetchLinkedInJobs.bind(this),
-      indeed: this.fetchIndeedJobs.bind(this),
-      // External API sources (optional)
-      // remotive: this.fetchRemotiveJobs.bind(this),
-      // adzuna: this.fetchAdzunaJobs.bind(this),
+      remoteok: this.fetchRemoteOKJobs.bind(this),
+      weworkremotely: this.fetchWeWorkRemotelyJobs.bind(this),
+      remotive: this.fetchRemotiveJobs.bind(this),
+      // LinkedIn and Indeed require browser automation (Puppeteer)
+      // linkedin: this.fetchLinkedInJobs.bind(this),
+      // indeed: this.fetchIndeedJobs.bind(this),
     };
   }
 
@@ -98,8 +99,122 @@ class JobFetchService {
   }
 
   /**
+   * Fetch jobs from RemoteOK (JSON API)
+   * RemoteOK provides a public JSON API for job listings
+   */
+  async fetchRemoteOKJobs() {
+    try {
+      console.log('Fetching jobs from RemoteOK...');
+
+      const response = await axios.get('https://remoteok.com/api', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      if (!response.data || !Array.isArray(response.data)) {
+        console.log('No jobs returned from RemoteOK');
+        return [];
+      }
+
+      // RemoteOK returns an array with first element being metadata, skip it
+      const jobData = response.data.slice(1, 21); // Get 20 jobs
+
+      const jobs = jobData
+        .filter(job => job && job.position) // Filter out invalid entries
+        .map(job => ({
+          title: job.position || 'No Title',
+          company: job.company || 'Unknown Company',
+          description: job.description || `${job.position} at ${job.company}`,
+          location: job.location || 'Remote',
+          salary: job.salary_min && job.salary_max
+            ? `$${job.salary_min} - $${job.salary_max}`
+            : 'Not specified',
+          jobType: job.employment_type || 'Full-time',
+          url: job.url || `https://remoteok.com/remote-jobs/${job.id}`,
+          postedDate: job.date ? new Date(job.date) : new Date(),
+          requirements: this.extractRequirements(job.description),
+          skills: JSON.stringify(job.tags || []),
+          status: 'active'
+        }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from RemoteOK`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from RemoteOK:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from WeWorkRemotely (Web Scraping)
+   * Scrapes job listings from WeWorkRemotely
+   */
+  async fetchWeWorkRemotelyJobs() {
+    try {
+      console.log('Fetching jobs from WeWorkRemotely...');
+
+      const response = await axios.get('https://weworkremotely.com/remote-jobs/search?term=developer', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // WeWorkRemotely job listings
+      $('li.feature, li:not(.feature)').each((index, element) => {
+        if (index >= 20) return false; // Limit to 20 jobs
+
+        const $job = $(element);
+        const $link = $job.find('a[href^="/remote-jobs/"]').first();
+
+        if (!$link.length) return; // Skip if no job link
+
+        const title = $link.find('.title').text().trim() ||
+                     $link.find('span.company').next().text().trim();
+        const company = $link.find('.company').text().trim();
+        const region = $link.find('.region').text().trim();
+        const jobUrl = $link.attr('href');
+
+        if (title && company) {
+          jobs.push({
+            title: title,
+            company: company,
+            description: `${title} position at ${company}. Remote work opportunity.`,
+            location: region || 'Remote',
+            salary: 'Not specified',
+            jobType: 'Full-time',
+            url: jobUrl ? `https://weworkremotely.com${jobUrl}` : '',
+            postedDate: new Date(),
+            requirements: 'See job posting for details',
+            skills: JSON.stringify(['Remote Work', 'Developer']),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from WeWorkRemotely`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from WeWorkRemotely:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Fetch jobs from LinkedIn (Web Scraping)
-   * Scrapes public LinkedIn job search results
+   * NOTE: LinkedIn blocks simple scraping - requires Puppeteer/Selenium
    */
   async fetchLinkedInJobs() {
     try {
@@ -260,8 +375,10 @@ class JobFetchService {
       const response = await axios.get('https://remotive.com/api/remote-jobs', {
         timeout: 15000,
         headers: {
-          'User-Agent': 'JobFetchBot/1.0'
-        }
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
       });
 
       if (!response.data || !response.data.jobs) {
