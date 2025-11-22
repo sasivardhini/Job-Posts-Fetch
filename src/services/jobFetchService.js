@@ -5,12 +5,18 @@ const { Job } = require('../models');
 class JobFetchService {
   constructor() {
     this.sources = {
+      // Major job boards (PRIMARY SOURCES)
+      linkedin: this.fetchLinkedInJobs.bind(this),
+      indeed: this.fetchIndeedJobs.bind(this),
+      naukri: this.fetchNaukriJobs.bind(this),
+
+      // Remote job boards (SECONDARY SOURCES)
       remoteok: this.fetchRemoteOKJobs.bind(this),
       weworkremotely: this.fetchWeWorkRemotelyJobs.bind(this),
       remotive: this.fetchRemotiveJobs.bind(this),
-      // LinkedIn and Indeed require browser automation (Puppeteer)
-      // linkedin: this.fetchLinkedInJobs.bind(this),
-      // indeed: this.fetchIndeedJobs.bind(this),
+      jsremotely: this.fetchJSRemotelyJobs.bind(this),
+      remoteco: this.fetchRemoteCoJobs.bind(this),
+      himalayas: this.fetchHimalayasJobs.bind(this),
     };
   }
 
@@ -213,6 +219,164 @@ class JobFetchService {
   }
 
   /**
+   * Fetch jobs from JSRemotely (RSS/Web Scraping)
+   * JavaScript and remote job listings
+   */
+  async fetchJSRemotelyJobs() {
+    try {
+      console.log('Fetching jobs from JSRemotely...');
+
+      const response = await axios.get('https://jsremotely.com/', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // JSRemotely job listings
+      $('.job-list-item, .job-listing, article').each((index, element) => {
+        if (index >= 20) return false;
+
+        const $job = $(element);
+        const title = $job.find('h2, h3, .job-title, .title').first().text().trim();
+        const company = $job.find('.company, .company-name').text().trim();
+        const location = $job.find('.location, .job-location').text().trim();
+        const url = $job.find('a').first().attr('href');
+
+        if (title && title.length > 3) {
+          jobs.push({
+            title: title,
+            company: company || 'Remote Company',
+            description: `${title} - JavaScript remote position`,
+            location: location || 'Remote',
+            salary: 'Not specified',
+            jobType: 'Full-time',
+            url: url && url.startsWith('http') ? url : `https://jsremotely.com${url || ''}`,
+            postedDate: new Date(),
+            requirements: 'JavaScript development experience',
+            skills: JSON.stringify(['JavaScript', 'Remote']),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from JSRemotely`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from JSRemotely:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Remote.co
+   * Remote jobs across all categories
+   */
+  async fetchRemoteCoJobs() {
+    try {
+      console.log('Fetching jobs from Remote.co...');
+
+      const response = await axios.get('https://remote.co/remote-jobs/developer/', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // Remote.co job listings
+      $('article, .job_listing, .position').each((index, element) => {
+        if (index >= 20) return false;
+
+        const $job = $(element);
+        const $link = $job.find('a').first();
+        const title = $job.find('h2, h3, .job-title').text().trim() || $link.text().trim();
+        const company = $job.find('.company, .company-name').text().trim();
+        const location = $job.find('.location').text().trim();
+        const url = $link.attr('href');
+
+        if (title && title.length > 3) {
+          jobs.push({
+            title: title,
+            company: company || 'Remote Company',
+            description: `${title} - Remote developer position`,
+            location: location || 'Remote',
+            salary: 'Not specified',
+            jobType: 'Full-time',
+            url: url && url.startsWith('http') ? url : `https://remote.co${url || ''}`,
+            postedDate: new Date(),
+            requirements: 'See job posting for details',
+            skills: JSON.stringify(['Remote', 'Developer']),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from Remote.co`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Remote.co:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Himalayas (Remote Jobs)
+   * Modern remote job board with clean API
+   */
+  async fetchHimalayasJobs() {
+    try {
+      console.log('Fetching jobs from Himalayas...');
+
+      const response = await axios.get('https://himalayas.app/jobs/api', {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      if (!response.data || !Array.isArray(response.data)) {
+        console.log('No jobs returned from Himalayas');
+        return [];
+      }
+
+      const jobs = response.data.slice(0, 20).map(job => ({
+        title: job.title || job.position || 'No Title',
+        company: job.company || job.company_name || 'Unknown Company',
+        description: job.description || `${job.title} at ${job.company}`,
+        location: job.location || job.locations?.join(', ') || 'Remote',
+        salary: job.salary || job.salary_range || 'Not specified',
+        jobType: job.type || job.employment_type || 'Full-time',
+        url: job.url || job.apply_url || '',
+        postedDate: job.published_at ? new Date(job.published_at) : new Date(),
+        requirements: this.extractRequirements(job.description),
+        skills: JSON.stringify(job.tags || job.skills || []),
+        status: 'active'
+      }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from Himalayas`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Himalayas:', error.message);
+      return [];
+    }
+  }
+
+  /**
    * Fetch jobs from LinkedIn (Web Scraping)
    * NOTE: LinkedIn blocks simple scraping - requires Puppeteer/Selenium
    */
@@ -360,6 +524,97 @@ class JobFetchService {
     } catch (error) {
       console.error('Error fetching from Indeed:', error.message);
       console.log('Note: Indeed may block scraping attempts. Consider rotating user agents or adding delays.');
+
+      // Return empty array instead of throwing to allow other sources to continue
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Naukri.com (India's #1 Job Portal)
+   * Scrapes job listings from Naukri
+   */
+  async fetchNaukriJobs() {
+    try {
+      const searchKeywords = process.env.NAUKRI_SEARCH_KEYWORDS || 'software developer';
+      const location = process.env.NAUKRI_LOCATION || 'India';
+
+      // Naukri's job search URL
+      const searchUrl = `https://www.naukri.com/${encodeURIComponent(searchKeywords)}-jobs`;
+
+      console.log(`Fetching jobs from Naukri: ${searchUrl}`);
+
+      const response = await axios.get(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://www.naukri.com/'
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // Naukri job card selectors
+      $('article.jobTuple, .cust-job-tuple, .jobTupleHeader').each((index, element) => {
+        if (index >= 20) return false; // Limit to 20 jobs
+
+        const $card = $(element);
+
+        // Try multiple selectors as Naukri's HTML structure varies
+        const title = $card.find('.title').text().trim() ||
+                     $card.find('.jobTitle').text().trim() ||
+                     $card.find('a.title').text().trim();
+
+        const company = $card.find('.companyInfo').text().trim() ||
+                       $card.find('.comp-name').text().trim() ||
+                       $card.find('.companyName').text().trim();
+
+        const location = $card.find('.location').text().trim() ||
+                        $card.find('.locWdth').text().trim();
+
+        const experience = $card.find('.experience').text().trim() ||
+                          $card.find('.expwdth').text().trim();
+
+        const salaryText = $card.find('.salary').text().trim() ||
+                          $card.find('.salaryWdth').text().trim();
+
+        const jobLink = $card.find('a.title').attr('href') ||
+                       $card.find('a.jobTitle').attr('href') ||
+                       $card.find('a').first().attr('href');
+
+        const jobUrl = jobLink && jobLink.startsWith('http') ? jobLink :
+                      jobLink ? `https://www.naukri.com${jobLink}` : '';
+
+        const snippet = $card.find('.job-description').text().trim() ||
+                       $card.find('.desc').text().trim();
+
+        if (title && company) {
+          jobs.push({
+            title: title,
+            company: company,
+            description: snippet || `${title} position at ${company}. View full details on Naukri.`,
+            location: location || 'India',
+            salary: salaryText || 'Not disclosed',
+            jobType: 'Full-time',
+            url: jobUrl,
+            postedDate: new Date(),
+            requirements: experience || snippet || 'See Naukri posting for requirements',
+            skills: JSON.stringify([searchKeywords]),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from Naukri`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Naukri:', error.message);
+      console.log('Note: Naukri may block scraping attempts. Consider using their API or adding delays.');
 
       // Return empty array instead of throwing to allow other sources to continue
       return [];
