@@ -1,16 +1,30 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { Job } = require('../models');
+const PuppeteerScraper = require('./puppeteerScraper');
+const {
+  getAxiosConfig,
+  randomDelay,
+  retryWithBackoff,
+  getProxyFromEnv,
+} = require('../utils/scraperUtils');
 
 class JobFetchService {
   constructor() {
-    this.sources = {
-      // Major job boards (PRIMARY SOURCES)
-      linkedin: this.fetchLinkedInJobs.bind(this),
-      indeed: this.fetchIndeedJobs.bind(this),
-      naukri: this.fetchNaukriJobs.bind(this),
+    // Initialize Puppeteer scraper for major job boards
+    this.puppeteerScraper = new PuppeteerScraper();
+    this.proxy = getProxyFromEnv();
 
-      // Remote job boards (SECONDARY SOURCES)
+    // Use Puppeteer for major job boards with anti-bot protection
+    const usePuppeteer = process.env.USE_PUPPETEER !== 'false'; // Enabled by default
+
+    this.sources = {
+      // Major job boards (PRIMARY SOURCES) - Use Puppeteer by default
+      linkedin: usePuppeteer ? this.fetchLinkedInJobsPuppeteer.bind(this) : this.fetchLinkedInJobs.bind(this),
+      indeed: usePuppeteer ? this.fetchIndeedJobsPuppeteer.bind(this) : this.fetchIndeedJobs.bind(this),
+      naukri: usePuppeteer ? this.fetchNaukriJobsPuppeteer.bind(this) : this.fetchNaukriJobs.bind(this),
+
+      // Remote job boards (SECONDARY SOURCES) - Use enhanced axios
       remoteok: this.fetchRemoteOKJobs.bind(this),
       weworkremotely: this.fetchWeWorkRemotelyJobs.bind(this),
       remotive: this.fetchRemotiveJobs.bind(this),
@@ -18,6 +32,42 @@ class JobFetchService {
       remoteco: this.fetchRemoteCoJobs.bind(this),
       himalayas: this.fetchHimalayasJobs.bind(this),
     };
+  }
+
+  /**
+   * Cleanup method to close browser instances
+   */
+  async cleanup() {
+    if (this.puppeteerScraper) {
+      await this.puppeteerScraper.close();
+    }
+  }
+
+  /**
+   * Fetch LinkedIn jobs using Puppeteer (RECOMMENDED)
+   */
+  async fetchLinkedInJobsPuppeteer() {
+    console.log('[Enhanced] Using Puppeteer for LinkedIn scraping...');
+    await randomDelay(1000, 2000); // Random delay before fetching
+    return await this.puppeteerScraper.fetchLinkedInJobs();
+  }
+
+  /**
+   * Fetch Indeed jobs using Puppeteer (RECOMMENDED)
+   */
+  async fetchIndeedJobsPuppeteer() {
+    console.log('[Enhanced] Using Puppeteer for Indeed scraping...');
+    await randomDelay(1000, 2000); // Random delay before fetching
+    return await this.puppeteerScraper.fetchIndeedJobs();
+  }
+
+  /**
+   * Fetch Naukri jobs using Puppeteer (RECOMMENDED)
+   */
+  async fetchNaukriJobsPuppeteer() {
+    console.log('[Enhanced] Using Puppeteer for Naukri scraping...');
+    await randomDelay(1000, 2000); // Random delay before fetching
+    return await this.puppeteerScraper.fetchNaukriJobs();
   }
 
   /**
@@ -110,17 +160,13 @@ class JobFetchService {
    */
   async fetchRemoteOKJobs() {
     try {
-      console.log('Fetching jobs from RemoteOK...');
+      console.log('[Enhanced] Fetching jobs from RemoteOK with rotating user agents...');
+      await randomDelay(500, 1500); // Add delay before request
 
-      const response = await axios.get('https://remoteok.com/api', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        },
-        timeout: 15000,
-        maxRedirects: 5,
-        validateStatus: (status) => status < 500
-      });
+      const config = getAxiosConfig({ proxy: this.proxy });
+      config.headers['Accept'] = 'application/json';
+
+      const response = await axios.get('https://remoteok.com/api', config);
 
       if (!response.data || !Array.isArray(response.data)) {
         console.log('No jobs returned from RemoteOK');
@@ -162,18 +208,11 @@ class JobFetchService {
    */
   async fetchWeWorkRemotelyJobs() {
     try {
-      console.log('Fetching jobs from WeWorkRemotely...');
+      console.log('[Enhanced] Fetching jobs from WeWorkRemotely...');
+      await randomDelay(500, 1500);
 
-      const response = await axios.get('https://weworkremotely.com/remote-jobs/search?term=developer', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5'
-        },
-        timeout: 15000,
-        maxRedirects: 5,
-        validateStatus: (status) => status < 500
-      });
+      const config = getAxiosConfig({ proxy: this.proxy });
+      const response = await axios.get('https://weworkremotely.com/remote-jobs/search?term=developer', config);
 
       const $ = cheerio.load(response.data);
       const jobs = [];
@@ -627,14 +666,12 @@ class JobFetchService {
    */
   async fetchRemotiveJobs() {
     try {
-      const response = await axios.get('https://remotive.com/api/remote-jobs', {
-        timeout: 15000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        },
-        maxRedirects: 5,
-        validateStatus: (status) => status < 500
-      });
+      await randomDelay(500, 1500);
+
+      const config = getAxiosConfig({ proxy: this.proxy });
+      config.headers['Accept'] = 'application/json';
+
+      const response = await axios.get('https://remotive.com/api/remote-jobs', config);
 
       if (!response.data || !response.data.jobs) {
         console.log('No jobs returned from Remotive API');
