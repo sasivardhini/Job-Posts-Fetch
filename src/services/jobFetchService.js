@@ -5,10 +5,11 @@ const { Job } = require('../models');
 class JobFetchService {
   constructor() {
     this.sources = {
-      mock: this.fetchMockJobs.bind(this),
-      // Add more sources here as needed
-      // github: this.fetchGithubJobs.bind(this),
-      // stackoverflow: this.fetchStackOverflowJobs.bind(this),
+      linkedin: this.fetchLinkedInJobs.bind(this),
+      indeed: this.fetchIndeedJobs.bind(this),
+      // External API sources (optional)
+      // remotive: this.fetchRemotiveJobs.bind(this),
+      // adzuna: this.fetchAdzunaJobs.bind(this),
     };
   }
 
@@ -94,6 +95,279 @@ class JobFetchService {
     }
 
     return savedJobs;
+  }
+
+  /**
+   * Fetch jobs from LinkedIn (Web Scraping)
+   * Scrapes public LinkedIn job search results
+   */
+  async fetchLinkedInJobs() {
+    try {
+      const searchKeywords = process.env.LINKEDIN_SEARCH_KEYWORDS || 'software developer';
+      const location = process.env.LINKEDIN_LOCATION || 'United States';
+
+      // LinkedIn's public job search URL
+      const searchUrl = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(searchKeywords)}&location=${encodeURIComponent(location)}&f_TPR=r86400`; // last 24 hours
+
+      console.log(`Fetching jobs from LinkedIn: ${searchUrl}`);
+
+      const response = await axios.get(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1'
+        },
+        timeout: 15000
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // LinkedIn job card selectors (may need updates if LinkedIn changes their HTML)
+      $('.base-card').each((index, element) => {
+        if (index >= 20) return false; // Limit to 20 jobs
+
+        const $card = $(element);
+
+        const title = $card.find('.base-search-card__title').text().trim() ||
+                     $card.find('h3').text().trim();
+        const company = $card.find('.base-search-card__subtitle').text().trim() ||
+                       $card.find('h4').text().trim();
+        const location = $card.find('.job-search-card__location').text().trim();
+        const jobUrl = $card.find('a').attr('href');
+        const datePosted = $card.find('time').attr('datetime');
+
+        if (title && company) {
+          jobs.push({
+            title: title,
+            company: company,
+            description: `${title} position at ${company}. View full details on LinkedIn.`,
+            location: location || 'Not specified',
+            salary: 'Not specified',
+            jobType: 'Full-time',
+            url: jobUrl || '',
+            postedDate: datePosted ? new Date(datePosted) : new Date(),
+            requirements: 'See LinkedIn posting for requirements',
+            skills: JSON.stringify([searchKeywords]),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from LinkedIn`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from LinkedIn:', error.message);
+      console.log('Note: LinkedIn may block scraping attempts. Consider using LinkedIn API or other sources.');
+
+      // Return empty array instead of throwing to allow other sources to continue
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Indeed (Web Scraping)
+   * Scrapes public Indeed job search results
+   */
+  async fetchIndeedJobs() {
+    try {
+      const searchKeywords = process.env.INDEED_SEARCH_KEYWORDS || 'software developer';
+      const location = process.env.INDEED_LOCATION || 'United States';
+
+      // Indeed's public job search URL
+      const searchUrl = `https://www.indeed.com/jobs?q=${encodeURIComponent(searchKeywords)}&l=${encodeURIComponent(location)}&sort=date`;
+
+      console.log(`Fetching jobs from Indeed: ${searchUrl}`);
+
+      const response = await axios.get(searchUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://www.indeed.com/'
+        },
+        timeout: 15000
+      });
+
+      const $ = cheerio.load(response.data);
+      const jobs = [];
+
+      // Indeed job card selectors
+      $('.job_seen_beacon, .cardOutline, .jobsearch-ResultsList > li').each((index, element) => {
+        if (index >= 20) return false; // Limit to 20 jobs
+
+        const $card = $(element);
+
+        // Try multiple selectors as Indeed's HTML structure varies
+        const title = $card.find('h2.jobTitle span[title]').attr('title') ||
+                     $card.find('h2.jobTitle').text().trim() ||
+                     $card.find('.jobTitle').text().trim();
+
+        const company = $card.find('[data-testid="company-name"]').text().trim() ||
+                       $card.find('.companyName').text().trim();
+
+        const location = $card.find('[data-testid="text-location"]').text().trim() ||
+                        $card.find('.companyLocation').text().trim();
+
+        const salaryText = $card.find('.salary-snippet').text().trim() ||
+                          $card.find('.metadata.salary-snippet-container').text().trim();
+
+        const jobLink = $card.find('h2.jobTitle a').attr('href') ||
+                       $card.find('a[data-jk]').attr('href');
+
+        const jobUrl = jobLink ? `https://www.indeed.com${jobLink}` : '';
+
+        const snippet = $card.find('.job-snippet').text().trim() ||
+                       $card.find('.summary').text().trim();
+
+        if (title && company) {
+          jobs.push({
+            title: title,
+            company: company,
+            description: snippet || `${title} position at ${company}. View full details on Indeed.`,
+            location: location || 'Not specified',
+            salary: salaryText || 'Not specified',
+            jobType: 'Full-time',
+            url: jobUrl,
+            postedDate: new Date(),
+            requirements: snippet || 'See Indeed posting for requirements',
+            skills: JSON.stringify([searchKeywords]),
+            status: 'active'
+          });
+        }
+      });
+
+      console.log(`Successfully scraped ${jobs.length} jobs from Indeed`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Indeed:', error.message);
+      console.log('Note: Indeed may block scraping attempts. Consider rotating user agents or adding delays.');
+
+      // Return empty array instead of throwing to allow other sources to continue
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Remotive.io API (Remote jobs)
+   * API Documentation: https://remotive.com/api
+   */
+  async fetchRemotiveJobs() {
+    try {
+      const response = await axios.get('https://remotive.com/api/remote-jobs', {
+        timeout: 15000,
+        headers: {
+          'User-Agent': 'JobFetchBot/1.0'
+        }
+      });
+
+      if (!response.data || !response.data.jobs) {
+        console.log('No jobs returned from Remotive API');
+        return [];
+      }
+
+      // Map Remotive jobs to our format
+      const jobs = response.data.jobs.slice(0, 20).map(job => ({
+        title: job.title || 'No Title',
+        company: job.company_name || 'Unknown Company',
+        description: job.description || 'No description available',
+        location: job.candidate_required_location || 'Remote',
+        salary: job.salary || 'Not specified',
+        jobType: job.job_type || 'Full-time',
+        url: job.url || '',
+        postedDate: job.publication_date ? new Date(job.publication_date) : new Date(),
+        requirements: this.extractRequirements(job.description),
+        skills: JSON.stringify(job.tags || []),
+        status: 'active'
+      }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from Remotive`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Remotive:', error.message);
+      throw new Error(`Remotive API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fetch jobs from Adzuna API
+   * Requires ADZUNA_APP_ID and ADZUNA_APP_KEY environment variables
+   * Sign up at: https://developer.adzuna.com/
+   */
+  async fetchAdzunaJobs() {
+    const appId = process.env.ADZUNA_APP_ID;
+    const appKey = process.env.ADZUNA_APP_KEY;
+
+    // Skip if credentials not configured
+    if (!appId || !appKey) {
+      console.log('Adzuna API credentials not configured. Skipping...');
+      console.log('Set ADZUNA_APP_ID and ADZUNA_APP_KEY in .env to enable Adzuna jobs');
+      return [];
+    }
+
+    try {
+      // Search for software developer jobs in the US
+      const response = await axios.get(
+        `https://api.adzuna.com/v1/api/jobs/us/search/1`,
+        {
+          params: {
+            app_id: appId,
+            app_key: appKey,
+            results_per_page: 20,
+            what: 'software developer'
+          },
+          timeout: 15000
+        }
+      );
+
+      if (!response.data || !response.data.results) {
+        console.log('No jobs returned from Adzuna API');
+        return [];
+      }
+
+      // Map Adzuna jobs to our format
+      const jobs = response.data.results.map(job => ({
+        title: job.title || 'No Title',
+        company: job.company?.display_name || 'Unknown Company',
+        description: job.description || 'No description available',
+        location: job.location?.display_name || 'Not specified',
+        salary: job.salary_min && job.salary_max
+          ? `$${Math.round(job.salary_min)} - $${Math.round(job.salary_max)}`
+          : 'Not specified',
+        jobType: job.contract_time || 'Full-time',
+        url: job.redirect_url || '',
+        postedDate: job.created ? new Date(job.created) : new Date(),
+        requirements: this.extractRequirements(job.description),
+        skills: JSON.stringify([job.category?.label || 'General'].filter(Boolean)),
+        status: 'active'
+      }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from Adzuna`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Adzuna:', error.message);
+      // Don't throw error, just return empty array to allow other sources to continue
+      return [];
+    }
+  }
+
+  /**
+   * Extract requirements from job description
+   */
+  extractRequirements(description) {
+    if (!description) return 'See job description';
+
+    // Simple extraction: look for requirements section
+    const reqMatch = description.match(/requirements?:?\s*(.{0,500})/i);
+    if (reqMatch && reqMatch[1]) {
+      return reqMatch[1].substring(0, 500).trim();
+    }
+
+    // Fallback: return first 200 characters
+    return description.substring(0, 200).replace(/<[^>]*>/g, '').trim() + '...';
   }
 
   /**
