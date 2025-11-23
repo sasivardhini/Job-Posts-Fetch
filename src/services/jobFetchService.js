@@ -2,6 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { Job } = require('../models');
 const PuppeteerScraper = require('./puppeteerScraper');
+const LinkedInScraper = require('./linkedinScraper');
 const {
   getAxiosConfig,
   randomDelay,
@@ -11,16 +12,22 @@ const {
 
 class JobFetchService {
   constructor() {
-    // Initialize Puppeteer scraper for major job boards
+    // Initialize scrapers for major job boards
     this.puppeteerScraper = new PuppeteerScraper();
+    this.linkedinScraper = new LinkedInScraper(); // NEW: Advanced LinkedIn scraper
     this.proxy = getProxyFromEnv();
 
-    // Use Puppeteer for major job boards with anti-bot protection
+    // LinkedIn scraping strategy (defaults to advanced multi-strategy)
+    const useAdvancedLinkedIn = process.env.USE_ADVANCED_LINKEDIN !== 'false'; // Enabled by default
+
+    // Use Puppeteer for other major job boards with anti-bot protection
     const usePuppeteer = process.env.USE_PUPPETEER !== 'false'; // Enabled by default
 
     this.sources = {
-      // Major job boards (PRIMARY SOURCES) - Use Puppeteer by default
-      linkedin: usePuppeteer ? this.fetchLinkedInJobsPuppeteer.bind(this) : this.fetchLinkedInJobs.bind(this),
+      // LinkedIn (PRIMARY SOURCE) - Advanced multi-strategy scraper
+      linkedin: useAdvancedLinkedIn ? this.fetchLinkedInJobsAdvanced.bind(this) : this.fetchLinkedInJobs.bind(this),
+
+      // Other major job boards - Use Puppeteer
       indeed: usePuppeteer ? this.fetchIndeedJobsPuppeteer.bind(this) : this.fetchIndeedJobs.bind(this),
       naukri: usePuppeteer ? this.fetchNaukriJobsPuppeteer.bind(this) : this.fetchNaukriJobs.bind(this),
 
@@ -46,14 +53,45 @@ class JobFetchService {
     if (this.puppeteerScraper) {
       await this.puppeteerScraper.close();
     }
+    if (this.linkedinScraper) {
+      await this.linkedinScraper.close();
+    }
   }
 
   /**
-   * Fetch LinkedIn jobs using Puppeteer (RECOMMENDED)
+   * Fetch LinkedIn jobs using ADVANCED multi-strategy scraper (RECOMMENDED)
+   *
+   * Uses 3 strategies:
+   * 1. Google Jobs search (bypasses LinkedIn AuthWall completely)
+   * 2. Stealth Puppeteer with anti-detection
+   * 3. Hybrid approach combining both
+   *
+   * Based on 2025 research from:
+   * - https://scrapfly.io/blog/posts/how-to-scrape-linkedin
+   * - https://scrapingant.com/blog/avoid-detection-with-puppeteer-stealth
+   */
+  async fetchLinkedInJobsAdvanced() {
+    const keywords = process.env.LINKEDIN_SEARCH_KEYWORDS || 'software developer';
+    const location = process.env.LINKEDIN_LOCATION || 'United States';
+
+    console.log('[LinkedIn Advanced] Using multi-strategy approach for maximum reliability...');
+
+    try {
+      const jobs = await this.linkedinScraper.fetchLinkedInJobs(keywords, location);
+      console.log(`[LinkedIn Advanced] Successfully fetched ${jobs.length} jobs`);
+      return jobs;
+    } catch (error) {
+      console.error('[LinkedIn Advanced] Error:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch LinkedIn jobs using basic Puppeteer (FALLBACK)
    */
   async fetchLinkedInJobsPuppeteer() {
-    console.log('[Enhanced] Using Puppeteer for LinkedIn scraping...');
-    await randomDelay(1000, 2000); // Random delay before fetching
+    console.log('[LinkedIn Puppeteer] Using basic Puppeteer scraper...');
+    await randomDelay(1000, 2000);
     return await this.puppeteerScraper.fetchLinkedInJobs();
   }
 
