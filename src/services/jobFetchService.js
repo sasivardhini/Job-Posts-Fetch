@@ -24,10 +24,15 @@ class JobFetchService {
       indeed: usePuppeteer ? this.fetchIndeedJobsPuppeteer.bind(this) : this.fetchIndeedJobs.bind(this),
       naukri: usePuppeteer ? this.fetchNaukriJobsPuppeteer.bind(this) : this.fetchNaukriJobs.bind(this),
 
-      // Remote job boards (SECONDARY SOURCES) - Use enhanced axios
+      // Free APIs with good reliability (RECOMMENDED)
       remoteok: this.fetchRemoteOKJobs.bind(this),
-      weworkremotely: this.fetchWeWorkRemotelyJobs.bind(this),
       remotive: this.fetchRemotiveJobs.bind(this),
+      arbeitnow: this.fetchArbeitnowJobs.bind(this),
+      themuse: this.fetchTheMuseJobs.bind(this),
+      usajobs: this.fetchUSAJobsJobs.bind(this),
+
+      // Additional remote job boards
+      weworkremotely: this.fetchWeWorkRemotelyJobs.bind(this),
       jsremotely: this.fetchJSRemotelyJobs.bind(this),
       remoteco: this.fetchRemoteCoJobs.bind(this),
       himalayas: this.fetchHimalayasJobs.bind(this),
@@ -759,6 +764,163 @@ class JobFetchService {
     } catch (error) {
       console.error('Error fetching from Adzuna:', error.message);
       // Don't throw error, just return empty array to allow other sources to continue
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from Arbeitnow API (European Jobs)
+   * Free API for jobs in Europe
+   * API Documentation: https://www.arbeitnow.com/api
+   */
+  async fetchArbeitnowJobs() {
+    try {
+      console.log('[Enhanced] Fetching jobs from Arbeitnow (Europe)...');
+      await randomDelay(500, 1500);
+
+      const config = getAxiosConfig({ proxy: this.proxy });
+      config.headers['Accept'] = 'application/json';
+
+      const response = await axios.get('https://www.arbeitnow.com/api/job-board-api', config);
+
+      if (!response.data || !response.data.data) {
+        console.log('No jobs returned from Arbeitnow');
+        return [];
+      }
+
+      const jobs = response.data.data.slice(0, 20).map(job => ({
+        title: job.title || 'No Title',
+        company: job.company_name || 'Unknown Company',
+        description: job.description || 'No description available',
+        location: job.location || 'Europe',
+        salary: job.salary || 'Not specified',
+        jobType: job.job_types?.join(', ') || 'Full-time',
+        url: job.url || '',
+        postedDate: job.created_at ? new Date(job.created_at) : new Date(),
+        requirements: this.extractRequirements(job.description),
+        skills: JSON.stringify(job.tags || []),
+        status: 'active'
+      }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from Arbeitnow`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from Arbeitnow:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from The Muse API
+   * API Documentation: https://www.themuse.com/developers/api/v2
+   */
+  async fetchTheMuseJobs() {
+    try {
+      console.log('[Enhanced] Fetching jobs from The Muse...');
+      await randomDelay(500, 1500);
+
+      const config = getAxiosConfig({ proxy: this.proxy });
+      config.headers['Accept'] = 'application/json';
+
+      // Search for software/engineering jobs
+      const response = await axios.get('https://www.themuse.com/api/public/jobs', {
+        ...config,
+        params: {
+          category: 'Engineering',
+          page: 1,
+          descending: true
+        }
+      });
+
+      if (!response.data || !response.data.results) {
+        console.log('No jobs returned from The Muse');
+        return [];
+      }
+
+      const jobs = response.data.results.slice(0, 20).map(job => ({
+        title: job.name || 'No Title',
+        company: job.company?.name || 'Unknown Company',
+        description: job.contents || 'No description available',
+        location: job.locations?.map(l => l.name).join(', ') || 'Not specified',
+        salary: 'Not specified',
+        jobType: job.type || 'Full-time',
+        url: job.refs?.landing_page || '',
+        postedDate: job.publication_date ? new Date(job.publication_date) : new Date(),
+        requirements: this.extractRequirements(job.contents),
+        skills: JSON.stringify(job.levels?.map(l => l.name) || []),
+        status: 'active'
+      }));
+
+      console.log(`Successfully fetched ${jobs.length} jobs from The Muse`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from The Muse:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch jobs from USAJobs API (US Government Jobs)
+   * Free API for federal government jobs
+   * API Documentation: https://developer.usajobs.gov/
+   * Note: Requires API key (set USAJOBS_API_KEY in .env)
+   */
+  async fetchUSAJobsJobs() {
+    const apiKey = process.env.USAJOBS_API_KEY;
+    const userAgent = process.env.USAJOBS_USER_AGENT || 'your-email@example.com';
+
+    // Skip if API key not configured
+    if (!apiKey) {
+      console.log('USAJobs API key not configured. Skipping...');
+      console.log('Get free API key at: https://developer.usajobs.gov/');
+      return [];
+    }
+
+    try {
+      console.log('[Enhanced] Fetching jobs from USAJobs (US Government)...');
+      await randomDelay(500, 1500);
+
+      const response = await axios.get('https://data.usajobs.gov/api/search', {
+        headers: {
+          'Host': 'data.usajobs.gov',
+          'User-Agent': userAgent,
+          'Authorization-Key': apiKey
+        },
+        params: {
+          Keyword: 'software developer',
+          ResultsPerPage: 20
+        },
+        timeout: 15000,
+        maxRedirects: 5,
+        validateStatus: (status) => status < 500
+      });
+
+      if (!response.data || !response.data.SearchResult || !response.data.SearchResult.SearchResultItems) {
+        console.log('No jobs returned from USAJobs');
+        return [];
+      }
+
+      const jobs = response.data.SearchResult.SearchResultItems.map(item => {
+        const job = item.MatchedObjectDescriptor;
+        return {
+          title: job.PositionTitle || 'No Title',
+          company: job.OrganizationName || 'US Government',
+          description: job.UserArea?.Details?.JobSummary || job.QualificationSummary || 'No description available',
+          location: job.PositionLocationDisplay || 'United States',
+          salary: job.PositionRemuneration?.[0]?.Description || 'See posting',
+          jobType: job.PositionSchedule?.[0]?.Name || 'Full-time',
+          url: job.ApplyURI?.[0] || '',
+          postedDate: job.PublicationStartDate ? new Date(job.PublicationStartDate) : new Date(),
+          requirements: job.QualificationSummary || 'See posting for requirements',
+          skills: JSON.stringify([job.JobCategory?.[0]?.Name || 'Government']),
+          status: 'active'
+        };
+      });
+
+      console.log(`Successfully fetched ${jobs.length} jobs from USAJobs`);
+      return jobs;
+    } catch (error) {
+      console.error('Error fetching from USAJobs:', error.message);
       return [];
     }
   }
